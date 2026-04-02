@@ -1,28 +1,28 @@
-# Python
+# --- PYTHON & CDK ---
 __pycache__/
 *.py[cod]
 *$py.class
-.venv/
-env/
 venv/
-ENV/
-*.pyc
-
-# CDK
+env/
+.venv/
+.env
+.pytest_cache/
 cdk.out/
 .cdk.staging/
-.parcel-cache/
 
-# AWS
-.aws/
-.env
+# --- TERRAFORM ---
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.lock.info
+tfplan
+tfplan.json
+*.tfvars
+*.tfvars.json
 
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# --- SYSTEM & IDE ---
 .DS_Store
-Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.log
