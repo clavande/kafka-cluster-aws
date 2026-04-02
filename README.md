@@ -1,98 +1,80 @@
-# Apache Kafka Cluster on AWS (Self-Managed)
+# 🚀 Apache Kafka Cluster (Self-Managed Multi-IaC)
 
-A production-grade, self-managed Apache Kafka cluster implementation on AWS using Infrastructure as Code (IaC). This repository follows a multi-IaC structure, starting with an AWS CDK (Python) implementation.
+A production-grade, highly available Apache Kafka cluster (v3.5.1) deployed on AWS **without using MSK**. This project demonstrates an identical architecture implemented across three different Infrastructure-as-Code (IaC) providers.
 
-## 🏗️ Architecture
+---
 
-```text
-[ Internet ]
-      |
-      v
-[ Public Subnets ]
-      |-- NAT Gateway (1)
-      |-- Bastion Host (SSM Managed)
-      v
-[ Private Subnets (3 AZs) ]
-      |-- Broker 0 (KRaft Controller+Broker) -- [ gp3 EBS (20G) ]
-      |-- Broker 1 (KRaft Controller+Broker) -- [ gp3 EBS (20G) ]
-      |-- Broker 2 (KRaft Controller+Broker) -- [ gp3 EBS (20G) ]
+## 🏗️ Architecture Detail
+- **Kafka Mode**: KRaft (ZooKeeper-less) for modern, consolidated metadata management.
+- **High Availability**: 3 Broker nodes distributed across **3 Availability Zones**.
+- **Distribution**: 3 Private Subnets + 1 Public Subnet (with NAT Gateway for outbound traffic).
+- **Security**: SSH-keyless management via **AWS SSM Session Manager** and least-privilege IAM roles.
+- **Service Discovery**: Automated internal DNS using **Route 53 Private Hosted Zones**.
+
+---
+
+## 📂 Project Structure
+| Directory | IaC Pillar | Language / Format | Network Range | Domain |
+| :--- | :--- | :--- | :--- | :--- |
+| `cdk/` | **AWS CDK** | Python | `10.0.0.0/16` | `cl-cdk.local` |
+| `cfn/` | **CloudFormation** | YAML | `10.1.0.0/16` | `cl-cfn.local` |
+| `tf/` | **Terraform** | HCL | `10.2.0.0/16` | `cl-tf.local` |
+
+---
+
+## 🚀 Deployment Instructions
+
+### 1️⃣ CloudFormation (Native)
+Run the automated deployment script from the root:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\cfn\deploy.ps1
 ```
 
-### Key Components
+### 2️⃣ Terraform (Industry Standard)
+Run the automated deployment script from the root:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tf\deploy.ps1
+```
 
-- **Networking**: VPC (10.0.0.0/16) with 3 AZs. Public subnets for incoming NAT traffic and a bastion host; private subnets for Kafka brokers.
-- **Compute**: 3 x `t3.medium` instances (1 per AZ) for Kafka brokers. 1 x `t3.micro` instance for a bastion host.
-- **Storage**: Amazon EBS (gp3) for Kafka logs, ensuring high IOPS and reliability over ephemeral storage.
-- **KRaft Mode**: Using Apache Kafka 3.x's KRaft (Kafka Raft) mode to eliminate dependency on Apache Zookeeper, simplifying the architecture and improving metadata management.
-
----
-
-## 🛠️ Design Decisions
-
-### KRaft vs. ZooKeeper
-- **KRaft** is the modern way to manage Kafka metadata without Zookeeper. It reduces operational overhead, improves scaling limits, and avoids the "split-brain" issues common with Zookeeper clusters in separate failure domains.
-
-### EC2 vs. Amazon MSK
-- This project implements **Self-Managed Kafka on EC2** to provide full control over configuration and deeper understanding of Kafka's internals. MSK is safer for production but less customizable for high-performance tuning or non-standard protocols.
-
-### EBS vs. EFS
-- Kafka is designed for direct-attached storage (DAS) or low-latency block storage like **Amazon EBS**. Using Amazon EFS (Network File System) would introduce latency overhead and performance bottlenecks for high-throughput messaging.
-
-### SSM vs. SSH
-- Access to instances is handled via **AWS Systems Manager (SSM) Session Manager**. This eliminates the need to manage SSH keys or open port 22 to the public internet, significantly hardening the security posture.
+### 3️⃣ AWS CDK (Code-First)
+Ensure you are in the `cdk/` directory:
+```bash
+cd cdk
+cdk deploy --all --profile chinmay
+```
 
 ---
 
-## 🚀 Deployment (CDK)
+## 🧪 Verification & Testing
 
-### Prerequisites
-- AWS CLI configured with appropriate permissions.
-- Python 3.9+ installed.
-- Node.js (for AWS CDK CLI).
+### 1. Check Cluster Quorum
+Log into **Broker 0** via SSM and run:
+```bash
+IP=$(hostname -I | awk '{print $1}')
+/opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-server $IP:9092 describe --status
+```
+*Goal: `CurrentVoters: [0, 1, 2]` shows a healthy, synchronized quorum.*
 
-### Steps
-1. Navigate to the `cdk` directory:
-   ```bash
-   cd cdk
-   ```
-2. Set up the virtual environment and install dependencies:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .\.venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-3. Bootstrap then deploy the CDK stacks:
-   ```bash
-   cdk bootstrap
-   cdk deploy --all
-   ```
+### 2. Multi-Node Replication Test
+Create a replicated topic across all 3 AZs:
+```bash
+/opt/kafka/bin/kafka-topics.sh --create --topic production-test \
+  --bootstrap-server $IP:9092 --partitions 3 --replication-factor 3
+```
+
+Check replication status:
+```bash
+/opt/kafka/bin/kafka-topics.sh --describe --topic production-test --bootstrap-server $IP:9092
+```
 
 ---
 
-## 🧪 Testing the Cluster
-
-1. **Connect to a Broker via SSM**:
-   Use the AWS Console or AWS CLI to start a session with a broker:
-   ```bash
-   aws ssm start-session --target <BROKER_INSTANCE_ID>
-   ```
-2. **Create a Topic**:
-   ```bash
-   /opt/kafka/bin/kafka-topics.sh --create --topic test-topic --bootstrap-server localhost:9092 --partitions 3 --replication-factor 3
-   ```
-3. **Produce Messages**:
-   ```bash
-   /opt/kafka/bin/kafka-console-producer.sh --topic test-topic --bootstrap-server localhost:9092
-   > Hello Kafka!
-   > Testing KRaft...
-   ```
-4. **Consume Messages from another Broker**:
-   ```bash
-   /opt/kafka/bin/kafka-console-consumer.sh --topic test-topic --bootstrap-server localhost:9092 --from-beginning
-   ```
+## 🛠️ Troubleshooting & Engineering
+- **UserData Logs**: Check `/var/log/user-data.log` on any broker for detailed installation traces.
+- **DNS Race Condition**: Fixed using the **"Placeholder + Sed"** pattern to ensure Route 53 propagation before service startup.
+- **IP Dynamic Listeners**: Automated via `\$(hostname -I)` to support dynamic node identification.
 
 ---
 
-## ⚠️ Important Note on Naming
-- All resources are prefixed with **`cl-cdk-`** to avoid conflicts in shared environments.
-- Future implementations will use `cl-cfn-` and `cl-tf-`.
+## 🛡️ License & Credit
+Implemented as part of a Senior-level Associate engineering exercise. 🚀🏆
