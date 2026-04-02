@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'cl-cfn-security-stack: Parameterized Security Groups'
+
+Resources:
+  KafkaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable Kafka and SSM traffic internally
+      VpcId: !ImportValue cl-cfn-vpc-id
+      GroupName: cl-cfn-kafka-sg
+      SecurityGroupIngress:
+        # Kafka Data Port
+        - IpProtocol: tcp
+          FromPort: 9092
+          ToPort: 9092
+          CidrIp: !ImportValue cl-cfn-vpc-cidr
+          Description: Allow Kafka Client connections from within VPC
+        # Kafka Controller/KRaft Port
+        - IpProtocol: tcp
+          FromPort: 9093
+          ToPort: 9093
+          CidrIp: !ImportValue cl-cfn-vpc-cidr
+          Description: Allow Kafka Controller traffic from within VPC
+        # SSH Port
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !ImportValue cl-cfn-vpc-cidr
+          Description: Allow internal SSH from within VPC
+      Tags:
+        - Key: Name
+          Value: cl-cfn-kafka-sg
+
+Outputs:
+  SecurityGroupId:
+    Value: !Ref KafkaSecurityGroup
+    Export:
+      Name: cl-cfn-security-group-id

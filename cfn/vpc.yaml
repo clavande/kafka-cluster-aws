@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'cl-cfn-vpc-stack: 3-AZ Network for Self-Managed Kafka'
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.1.0.0/16
+  DomainName:
+    Type: String
+    Default: cl-cfn.local
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: cl-cfn-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: cl-cfn-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnet in Zone A (for NAT)
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 6, 8]]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: cl-cfn-public-subnet-a
+
+  # Private Subnets (Across 3 AZs)
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 6, 8]]
+      Tags:
+        - Key: Name
+          Value: cl-cfn-private-subnet-a
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 6, 8]]
+      Tags:
+        - Key: Name
+          Value: cl-cfn-private-subnet-b
+
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs '']
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 6, 8]]
+      Tags:
+        - Key: Name
+          Value: cl-cfn-private-subnet-c
+
+  EipNatA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EipNatA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: cl-cfn-nat-a
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: cl-cfn-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: cl-cfn-private-rt
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetC
+      RouteTableId: !Ref PrivateRouteTable
+
+  KafkaHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Join ['', [!Ref DomainName, '.']]
+      VPCs:
+        - VPCId: !Ref VPC
+          VPCRegion: !Ref 'AWS::Region'
+      HostedZoneConfig:
+        Comment: !Sub 'Private zone for ${DomainName}'
+
+Outputs:
+  VpcId:
+    Value: !Ref VPC
+    Export:
+      Name: cl-cfn-vpc-id
+  VpcCidr:
+    Value: !Ref VpcCidr
+    Export:
+      Name: cl-cfn-vpc-cidr
+  PublicSubnetA:
+    Value: !Ref PublicSubnetA
+    Export:
+      Name: cl-cfn-public-subnet-a
+  PrivateSubnetA:
+    Value: !Ref PrivateSubnetA
+    Export:
+      Name: cl-cfn-private-subnet-a
+  PrivateSubnetB:
+    Value: !Ref PrivateSubnetB
+    Export:
+      Name: cl-cfn-private-subnet-b
+  PrivateSubnetC:
+    Value: !Ref PrivateSubnetC
+    Export:
+      Name: cl-cfn-private-subnet-c
+  HostedZoneId:
+    Value: !Ref KafkaHostedZone
+    Export:
+      Name: cl-cfn-hosted-zone-id
+  DomainName:
+    Value: !Ref DomainName
+    Export:
+      Name: cl-cfn-domain-name

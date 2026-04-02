@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'cl-cfn-iam-stack: Identity and Access Management for Self-Managed Kafka'
+
+Resources:
+  # IAM Role for Kafka Brokers
+  KafkaBrokerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: cl-cfn-kafka-broker-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # SSM access for secure session management
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        # CloudWatch access for logs and metrics
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Name
+          Value: cl-cfn-iam-role
+
+  # Instance Profile (used to associate the Role with the EC2 Instance)
+  KafkaInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: cl-cfn-kafka-instance-profile
+      Roles:
+        - !Ref KafkaBrokerRole
+
+Outputs:
+  InstanceProfile:
+    Value: !Ref KafkaInstanceProfile
+    Export:
+      Name: cl-cfn-instance-profile

@@ -1,0 +1,274 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'cl-cfn-compute-stack: 3 x Kafka Brokers (Placeholder version)'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.medium
+  KafkaVersion:
+    Type: String
+    Default: '3.5.1'
+  ScalaVersion:
+    Type: String
+    Default: '2.13'
+  KafkaClusterId:
+    Type: String
+    Default: 'xtXvUT8RTlCHw7d_k-21rA'
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64'
+
+Resources:
+  # --- BASTION HOST ---
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref LatestAmiId
+      SubnetId: !ImportValue cl-cfn-public-subnet-a
+      IamInstanceProfile: !ImportValue cl-cfn-instance-profile
+      SecurityGroupIds:
+        - !ImportValue cl-cfn-security-group-id
+      Tags:
+        - Key: Name
+          Value: cl-cfn-bastion
+
+  # --- BROKER 0 ---
+  Broker0:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !ImportValue cl-cfn-private-subnet-a
+      IamInstanceProfile: !ImportValue cl-cfn-instance-profile
+      SecurityGroupIds:
+        - !ImportValue cl-cfn-security-group-id
+      Tags:
+        - Key: Name
+          Value: cl-cfn-broker-0
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            exec > /var/log/user-data.log 2>&1
+            yum update -y
+            yum install -y java-17-amazon-corretto-devel wget tar
+            KAFKA_DIR="/opt/kafka"
+            mkdir -p $KAFKA_DIR
+            curl -L "https://archive.apache.org/dist/kafka/${KV}/kafka_${SV}-${KV}.tgz" -o /tmp/kafka.tgz
+            tar -xzf /tmp/kafka.tgz -C $KAFKA_DIR --strip-components=1
+            
+            # Write with placeholders to avoid $ evaluation issues
+            cat <<'EOF' > $KAFKA_DIR/config/kraft/server.properties
+            process.roles=broker,controller
+            node.id=0
+            controller.quorum.voters=0@broker-0.cl-cfn.local:9093,1@broker-1.cl-cfn.local:9093,2@broker-2.cl-cfn.local:9093
+            listeners=PLAINTEXT://REPLACE_IP:9092,CONTROLLER://REPLACE_IP:9093
+            inter.broker.listener.name=PLAINTEXT
+            advertised.listeners=PLAINTEXT://broker-0.cl-cfn.local:9092
+            controller.listener.names=CONTROLLER
+            listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            log.dirs=/var/lib/kafka-logs
+            num.partitions=3
+            offsets.topic.replication.factor=3
+            transaction.state.log.replication.factor=3
+            transaction.state.log.min.isr=2
+            EOF
+
+            # Use sed to swap the placeholder for the real IP
+            IP_ADDR=$(hostname -I | awk '{print $1}')
+            sed -i "s/REPLACE_IP/${!IP_ADDR}/g" $KAFKA_DIR/config/kraft/server.properties
+
+            $KAFKA_DIR/bin/kafka-storage.sh format -t ${KID} -c $KAFKA_DIR/config/kraft/server.properties
+            mkdir -p /var/lib/kafka-logs
+            chown -R ec2-user:ec2-user /var/lib/kafka-logs
+            chown -R ec2-user:ec2-user /opt/kafka
+
+            cat <<EOF > /etc/systemd/system/kafka.service
+            [Unit]
+            Description=Apache Kafka Cluster Service
+            [Service]
+            User=ec2-user
+            ExecStart=$KAFKA_DIR/bin/kafka-server-start.sh $KAFKA_DIR/config/kraft/server.properties
+            Restart=always
+            RestartSec=15
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            systemctl enable kafka
+            systemctl start kafka
+          - KV: !Ref KafkaVersion
+            SV: !Ref ScalaVersion
+            KID: !Ref KafkaClusterId
+
+  # --- BROKER 1 ---
+  Broker1:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !ImportValue cl-cfn-private-subnet-b
+      IamInstanceProfile: !ImportValue cl-cfn-instance-profile
+      SecurityGroupIds:
+        - !ImportValue cl-cfn-security-group-id
+      Tags:
+        - Key: Name
+          Value: cl-cfn-broker-1
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            exec > /var/log/user-data.log 2>&1
+            yum update -y
+            yum install -y java-17-amazon-corretto-devel wget tar
+            KAFKA_DIR="/opt/kafka"
+            mkdir -p $KAFKA_DIR
+            curl -L "https://archive.apache.org/dist/kafka/${KV}/kafka_${SV}-${KV}.tgz" -o /tmp/kafka.tgz
+            tar -xzf /tmp/kafka.tgz -C $KAFKA_DIR --strip-components=1
+
+            cat <<'EOF' > $KAFKA_DIR/config/kraft/server.properties
+            process.roles=broker,controller
+            node.id=1
+            controller.quorum.voters=0@broker-0.cl-cfn.local:9093,1@broker-1.cl-cfn.local:9093,2@broker-2.cl-cfn.local:9093
+            listeners=PLAINTEXT://REPLACE_IP:9092,CONTROLLER://REPLACE_IP:9093
+            inter.broker.listener.name=PLAINTEXT
+            advertised.listeners=PLAINTEXT://broker-1.cl-cfn.local:9092
+            controller.listener.names=CONTROLLER
+            listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            log.dirs=/var/lib/kafka-logs
+            num.partitions=3
+            offsets.topic.replication.factor=3
+            transaction.state.log.replication.factor=3
+            transaction.state.log.min.isr=2
+            EOF
+
+            IP_ADDR=$(hostname -I | awk '{print $1}')
+            sed -i "s/REPLACE_IP/${!IP_ADDR}/g" $KAFKA_DIR/config/kraft/server.properties
+
+            $KAFKA_DIR/bin/kafka-storage.sh format -t ${KID} -c $KAFKA_DIR/config/kraft/server.properties
+            mkdir -p /var/lib/kafka-logs
+            chown -R ec2-user:ec2-user /var/lib/kafka-logs
+            chown -R ec2-user:ec2-user /opt/kafka
+
+            cat <<EOF > /etc/systemd/system/kafka.service
+            [Unit]
+            Description=Apache Kafka Cluster Service
+            [Service]
+            User=ec2-user
+            ExecStart=$KAFKA_DIR/bin/kafka-server-start.sh $KAFKA_DIR/config/kraft/server.properties
+            Restart=always
+            RestartSec=15
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            systemctl enable kafka
+            systemctl start kafka
+          - KV: !Ref KafkaVersion
+            SV: !Ref ScalaVersion
+            KID: !Ref KafkaClusterId
+
+  # --- BROKER 2 ---
+  Broker2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestAmiId
+      SubnetId: !ImportValue cl-cfn-private-subnet-c
+      IamInstanceProfile: !ImportValue cl-cfn-instance-profile
+      SecurityGroupIds:
+        - !ImportValue cl-cfn-security-group-id
+      Tags:
+        - Key: Name
+          Value: cl-cfn-broker-2
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            exec > /var/log/user-data.log 2>&1
+            yum update -y
+            yum install -y java-17-amazon-corretto-devel wget tar
+            KAFKA_DIR="/opt/kafka"
+            mkdir -p $KAFKA_DIR
+            curl -L "https://archive.apache.org/dist/kafka/${KV}/kafka_${SV}-${KV}.tgz" -o /tmp/kafka.tgz
+            tar -xzf /tmp/kafka.tgz -C $KAFKA_DIR --strip-components=1
+
+            cat <<'EOF' > $KAFKA_DIR/config/kraft/server.properties
+            process.roles=broker,controller
+            node.id=2
+            controller.quorum.voters=0@broker-0.cl-cfn.local:9093,1@broker-1.cl-cfn.local:9093,2@broker-2.cl-cfn.local:9093
+            listeners=PLAINTEXT://REPLACE_IP:9092,CONTROLLER://REPLACE_IP:9093
+            inter.broker.listener.name=PLAINTEXT
+            advertised.listeners=PLAINTEXT://broker-2.cl-cfn.local:9092
+            controller.listener.names=CONTROLLER
+            listener.security.protocol.map=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+            log.dirs=/var/lib/kafka-logs
+            num.partitions=3
+            offsets.topic.replication.factor=3
+            transaction.state.log.replication.factor=3
+            transaction.state.log.min.isr=2
+            EOF
+
+            IP_ADDR=$(hostname -I | awk '{print $1}')
+            sed -i "s/REPLACE_IP/${!IP_ADDR}/g" $KAFKA_DIR/config/kraft/server.properties
+
+            $KAFKA_DIR/bin/kafka-storage.sh format -t ${KID} -c $KAFKA_DIR/config/kraft/server.properties
+            mkdir -p /var/lib/kafka-logs
+            chown -R ec2-user:ec2-user /var/lib/kafka-logs
+            chown -R ec2-user:ec2-user /opt/kafka
+
+            cat <<EOF > /etc/systemd/system/kafka.service
+            [Unit]
+            Description=Apache Kafka Cluster Service
+            [Service]
+            User=ec2-user
+            ExecStart=$KAFKA_DIR/bin/kafka-server-start.sh $KAFKA_DIR/config/kraft/server.properties
+            Restart=always
+            RestartSec=15
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            systemctl enable kafka
+            systemctl start kafka
+          - KV: !Ref KafkaVersion
+            SV: !Ref ScalaVersion
+            KID: !Ref KafkaClusterId
+
+  Broker0Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !ImportValue cl-cfn-hosted-zone-id
+      Name: 'broker-0.cl-cfn.local.'
+      Type: A
+      TTL: '60'
+      ResourceRecords:
+        - !GetAtt Broker0.PrivateIp
+
+  Broker1Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !ImportValue cl-cfn-hosted-zone-id
+      Name: 'broker-1.cl-cfn.local.'
+      Type: A
+      TTL: '60'
+      ResourceRecords:
+        - !GetAtt Broker1.PrivateIp
+
+  Broker2Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !ImportValue cl-cfn-hosted-zone-id
+      Name: 'broker-2.cl-cfn.local.'
+      Type: A
+      TTL: '60'
+      ResourceRecords:
+        - !GetAtt Broker2.PrivateIp
+
+Outputs:
+  Broker0PrivateIP:
+    Value: !GetAtt Broker0.PrivateIp
+  Broker1PrivateIP:
+    Value: !GetAtt Broker1.PrivateIp
+  Broker2PrivateIP:
+    Value: !GetAtt Broker2.PrivateIp
+  BastionPublicIP:
+    Value: !GetAtt BastionHost.PublicIp
