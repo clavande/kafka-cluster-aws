@@ -51,3 +51,9 @@ variable "kafka_cluster_id" {
   type        = string
   default     = "xtXvUT8RTlCHw7d_k-21rA"
 }
+
+variable "kafka_secret_name" {
+  description = "Name of the secret in Secrets Manager"
+  type        = string
+  default     = "cl-tf-kafka-admin-auth"
+}

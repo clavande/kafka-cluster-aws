@@ -1,19 +1,20 @@
-# cl-tf Professional Deployment Automation Script
-# Implements Init, Validate, Plan, and Auto-Apply
+# cl-tf Direct Deployment Script
+# No variables, No confusion
 
-Write-Host "-------------------------------------------" -ForegroundColor Gray
-Write-Host "🚀 Initializing Terraform..." -ForegroundColor Cyan
+$ErrorActionPreference = "Stop"
+
+Write-Host "-------------------------------------------"
+Write-Host ">>> Initializing Terraform..."
 terraform -chdir=tf init
 
-Write-Host "🔍 Validating Configuration..." -ForegroundColor Cyan
+Write-Host ">>> Validating Configuration..."
 terraform -chdir=tf validate
-if ($LASTEXITCODE -ne 0) { return }
 
-Write-Host "📝 Generating Plan..." -ForegroundColor Yellow
+Write-Host ">>> Generating Plan..."
 terraform -chdir=tf plan -out=tfplan
 
-Write-Host "🔥 Applying Infrastructure..." -ForegroundColor Green
+Write-Host ">>> Applying Infrastructure..."
 terraform -chdir=tf apply -auto-approve tfplan
 
-Write-Host "-------------------------------------------" -ForegroundColor Gray
-Write-Host "🏁 TERRAFORM INFRASTRUCTURE DEPLOYED SUCCESSFULLY! 🚀🔥" -ForegroundColor White -BackgroundColor Green
+Write-Host "-------------------------------------------"
+Write-Host ">>> SUCCESS: TERRAFORM INFRASTRUCTURE DEPLOYED! <<<"
