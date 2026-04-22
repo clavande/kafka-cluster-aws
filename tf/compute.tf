@@ -11,7 +11,7 @@ resource "aws_instance" "bastion" {
   iam_instance_profile        = aws_iam_instance_profile.broker.name
   vpc_security_group_ids      = [aws_security_group.kafka.id]
   associate_public_ip_address = true
-  
+
   tags = {
     Name = "${var.project_name}-bastion"
   }

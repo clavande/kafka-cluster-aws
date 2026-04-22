@@ -1,0 +1,46 @@
+name: "Terraform CI"
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+
+jobs:
+  terraform-ci:
+    name: "Terraform Validation & Security"
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./tf
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check
+        continue-on-error: false
+
+      - name: Terraform Init (Backend-less)
+        id: init
+        # We use -backend=false because we aren't deploying yet
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+
+      - name: Security Scan (tfsec)
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: ./tf
+          # We don't want to fail the whole build for minor warnings yet
+          soft_fail: true 
